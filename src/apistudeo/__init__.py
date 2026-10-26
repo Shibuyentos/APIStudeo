@@ -2,6 +2,19 @@
 
 from importlib.metadata import version
 
+from apistudeo.exceptions import (
+    AuthenticationError,
+    RateLimitError,
+    StudeoAPIError,
+    StudeoError,
+)
+
 __version__ = version("apistudeo")
 
-__all__ = ["__version__"]
+__all__ = [
+    "AuthenticationError",
+    "RateLimitError",
+    "StudeoAPIError",
+    "StudeoError",
+    "__version__",
+]
