@@ -9,16 +9,34 @@ from apistudeo.exceptions import (
     StudeoAPIError,
     StudeoError,
 )
-from apistudeo.models import AuthInfo
+from apistudeo.models import (
+    Announcement,
+    AuthInfo,
+    Course,
+    Deadline,
+    Discipline,
+    Grade,
+    ServerTime,
+    StudyEvent,
+    User,
+)
 
 __version__ = version("apistudeo")
 
 __all__ = [
+    "Announcement",
     "AuthInfo",
     "AuthenticationError",
+    "Course",
+    "Deadline",
+    "Discipline",
+    "Grade",
     "RateLimitError",
+    "ServerTime",
     "StudeoAPIError",
     "StudeoClient",
     "StudeoError",
+    "StudyEvent",
+    "User",
     "__version__",
 ]
