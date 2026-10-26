@@ -158,3 +158,11 @@ class Grade(StudeoModel):
     value: float | None = None
     weight: float | None = None
     recorded_at: datetime | None = None
+
+
+class _PendingCount(StudeoModel):
+    total: int = Field(default=0, alias="somaTotal")
+
+
+class _UnreadCount(StudeoModel):
+    count: int = Field(default=0, alias="qtdMensagem")

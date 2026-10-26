@@ -4,23 +4,47 @@ from __future__ import annotations
 
 import logging
 import re
+import warnings
 from types import TracebackType
+from typing import TypeVar
 
 import httpx
+from pydantic import TypeAdapter, ValidationError
 
 from apistudeo import endpoints
 from apistudeo._http import HttpTransport
 from apistudeo.exceptions import AuthenticationError, StudeoAPIError
-from apistudeo.models import AuthInfo
+from apistudeo.models import (
+    Announcement,
+    AuthInfo,
+    Deadline,
+    Discipline,
+    Grade,
+    ServerTime,
+    StudyEvent,
+    User,
+    _PendingCount,
+    _UnreadCount,
+)
 from apistudeo.utils import mask_cpf, mask_token
 
 logger = logging.getLogger(__name__)
+
+T = TypeVar("T")
 
 DEFAULT_TIMEOUT = 30.0
 DEFAULT_MIN_REQUEST_INTERVAL = 2.0
 
 _JWT_PATTERN = re.compile(r"(eyJ[a-zA-Z0-9_-]+\.eyJ[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+)")
 _TOKEN_COOKIES = ("token", "auth_token", "JSESSIONID")
+
+_SERVER_TIME = TypeAdapter(ServerTime)
+_USER = TypeAdapter(User)
+_DISCIPLINES = TypeAdapter(list[Discipline])
+_STUDY_PLAN = TypeAdapter(list[StudyEvent])
+_ANNOUNCEMENTS = TypeAdapter(list[Announcement])
+_UNREAD = TypeAdapter(list[_UnreadCount])
+_PENDING = TypeAdapter(_PendingCount)
 
 
 class StudeoClient:
@@ -131,6 +155,62 @@ class StudeoClient:
             self._http.clear_tokens()
         logger.info("Logout concluído.")
 
+    def get_server_time(self) -> ServerTime:
+        """Consulta a hora do servidor do Studeo."""
+        return self._fetch(endpoints.AUTH_TOKEN_TIME_INFO, _SERVER_TIME)
+
+    def get_user_info(self) -> User:
+        """Busca os dados do usuário logado."""
+        return self._fetch(endpoints.USUARIO_INFO_LOGIN, _USER)
+
+    def get_disciplines(self, curricular: bool = True) -> list[Discipline]:
+        """Lista as disciplinas curriculares (padrão) ou as não curriculares."""
+        path = endpoints.DISCIPLINAS_CURRICULARES.format(curricular=str(curricular).lower())
+        return self._fetch(path, _DISCIPLINES, empty=[])
+
+    def get_all_disciplines(self) -> list[Discipline]:
+        """Lista as disciplinas curriculares seguidas das não curriculares."""
+        return self.get_disciplines(curricular=True) + self.get_disciplines(curricular=False)
+
+    def get_study_plan(self) -> list[StudyEvent]:
+        """Lista os eventos do plano de estudo."""
+        return self._fetch(endpoints.PLANO_ESTUDO_DISCIPLINAS, _STUDY_PLAN, empty=[])
+
+    def get_announcements(self, page_size: int = 7) -> list[Announcement]:
+        """Lista os avisos do mediador, dos mais novos para os mais antigos."""
+        if page_size < 1:
+            raise ValueError("page_size deve ser pelo menos 1.")
+        params = {
+            "aba": "AVISO",
+            "mediador": "false",
+            "novasPrimeiro": "true",
+            "pageOffset": str(page_size),
+            "startIndex": "0",
+        }
+        return self._fetch(endpoints.ATENDIMENTO_LISTA, _ANNOUNCEMENTS, params=params, empty=[])
+
+    def get_unread_count(self) -> int:
+        """Total de mensagens não lidas, somando todas as situações (comunicados etc.)."""
+        entries = self._fetch(endpoints.MENSAGENS_NAO_LIDAS, _UNREAD, empty=[])
+        return sum(entry.count for entry in entries)
+
+    def get_pending_count(self) -> int:
+        """Total de atividades pendentes. A API devolve só a contagem, sem a lista."""
+        return self._fetch(endpoints.DISCIPLINAS_AFAZER, _PENDING, empty=_PendingCount()).total
+
+    def get_deadlines(self) -> list[Deadline]:
+        """Prazos derivados do plano de estudo: um por evento que tenha data final."""
+        return [Deadline.from_study_event(e) for e in self.get_study_plan() if e.end_at]
+
+    def get_grades(self) -> list[Grade]:
+        """Experimental: o endpoint de notas ainda não foi descoberto; devolve lista vazia."""
+        warnings.warn(
+            "get_grades() é experimental: o endpoint de notas do Studeo ainda não foi "
+            "mapeado e o método sempre devolve uma lista vazia.",
+            stacklevel=2,
+        )
+        return []
+
     def close(self) -> None:
         """Fecha a conexão HTTP. Não faz logout."""
         self._http.close()
@@ -145,6 +225,40 @@ class StudeoClient:
         tb: TracebackType | None,
     ) -> None:
         self.close()
+
+    def _ensure_session(self) -> None:
+        if not self._http.token:
+            self.login()
+
+    def _fetch(
+        self,
+        path: str,
+        adapter: TypeAdapter[T],
+        *,
+        params: dict[str, str] | None = None,
+        empty: T | None = None,
+    ) -> T:
+        """GET autenticado que valida o JSON com o adapter.
+
+        Resposta 204 ou sem corpo devolve ``empty``; se ``empty`` for None, isso é erro.
+        """
+        self._ensure_session()
+        response = self._http.request("GET", path, params=params)
+        if response.status_code == 204 or not response.content:
+            if empty is None:
+                raise StudeoAPIError(
+                    f"Resposta vazia em GET {path}.", status_code=response.status_code
+                )
+            return empty
+        try:
+            return adapter.validate_json(response.content)
+        except ValidationError as exc:
+            raise StudeoAPIError(
+                f"Resposta fora do formato esperado em GET {path} "
+                f"({exc.error_count()} erro(s) de validação).",
+                status_code=response.status_code,
+                response_text=response.text,
+            ) from exc
 
 
 def _extract_tokens(response: httpx.Response) -> tuple[str | None, str | None]:
