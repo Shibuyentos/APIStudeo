@@ -1,0 +1,18 @@
+# Credenciais e capturas de tráfego (podem conter CPF, senha e tokens)
+.env
+*.har
+dumps/
+
+# Python
+__pycache__/
+.venv/
+
+# Build
+dist/
+build/
+*.egg-info/
+
+# Ferramentas
+.coverage
+.pytest_cache/
+.ruff_cache/
