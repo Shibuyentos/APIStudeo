@@ -46,10 +46,9 @@ class HttpTransport:
         return self._client.is_closed
 
     def set_tokens(self, token: str, refresh_token: str | None = None) -> None:
-        """Define o token enviado no header Authorization (sem prefixo Bearer)."""
+        """Define os tokens da sessão. O token vai no header Authorization, sem prefixo Bearer."""
         self.token = token
-        if refresh_token:
-            self.refresh_token = refresh_token
+        self.refresh_token = refresh_token
         self._client.headers["Authorization"] = token
         logger.debug("Token configurado: %s", mask_token(token))
 
@@ -79,8 +78,8 @@ class HttpTransport:
         _raise_for_status(response, method, path)
         return response
 
-    def renew(self) -> None:
-        """Troca o refresh token por um token novo."""
+    def renew(self) -> tuple[str, str | None]:
+        """Troca o refresh token por um token novo e devolve (token, refresh_token)."""
         if not self.refresh_token:
             raise AuthenticationError("Não há refresh token para renovar a sessão.")
         response = self._send(
@@ -95,8 +94,11 @@ class HttpTransport:
                 f"Não foi possível renovar o token (status {response.status_code})."
             )
         refresh_token = data.get("refreshToken")
-        self.set_tokens(token, refresh_token if isinstance(refresh_token, str) else None)
+        if not isinstance(refresh_token, str) or not refresh_token:
+            refresh_token = self.refresh_token
+        self.set_tokens(token, refresh_token)
         logger.info("Token renovado.")
+        return token, refresh_token
 
     def close(self) -> None:
         self._client.close()
